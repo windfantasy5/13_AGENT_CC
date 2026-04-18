@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(D:/06_develop/py312/python.exe -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(taskkill //F //PID 23048)",
+      "Bash(curl:*)",
+      "Bash(D:/06_develop/py312/python.exe -c \"import sys,json; print\\(json.load\\(sys.stdin\\)[''''data''''][''''access_token'''']\\)\")",
+      "Bash(D:/06_develop/py312/python.exe -m json.tool)",
+      "Bash(D:/06_develop/py312/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(taskkill //F //PID 24616 //PID 20856)"
+    ]
+  }
+}

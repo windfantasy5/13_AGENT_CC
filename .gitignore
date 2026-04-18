@@ -1,0 +1,41 @@
+# 虚拟环境（绝对不要上传！）
+venv/
+env/
+.venv/
+.env/
+
+# Python缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# PyCharm IDE配置（本地专属，无需共享）
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# 敏感信息/环境变量（绝对禁止上传！）
+.env
+.env.*
+!.env.example  # 仅保留模板文件，不包含真实密码
+
+# 日志/临时文件
+logs/
+*.log
+*.tmp
+*.bak
+
+# 数据库文件（本地测试用，不要上传）
+*.db
+*.sqlite3
+
+# 系统文件
+.DS_Store  # macOS
+Thumbs.db  # Windows
+
+# 打包/构建文件
+dist/
+build/
+*.egg-info/
