@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Chat from './pages/Chat';
 import Knowledge from './pages/Knowledge';
+import Prompts from './pages/Prompts';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('token');
@@ -26,6 +27,14 @@ function App() {
           element={
             <PrivateRoute>
               <Knowledge />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/prompts"
+          element={
+            <PrivateRoute>
+              <Prompts />
             </PrivateRoute>
           }
         />

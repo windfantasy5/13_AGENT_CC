@@ -1,6 +1,6 @@
 """
 PDF处理器
-支持纯文字PDF和OCR识别
+支持纯文字PDF和OCR识别，并将PDF转换为Markdown格式（保留图片、表格描述）
 """
 import io
 from typing import Optional, Tuple
@@ -15,6 +15,9 @@ class PDFProcessor:
 
     def __init__(self):
         self.ocr_available = False
+        self.pymupdf_available = False
+
+        # 尝试加载PaddleOCR
         try:
             from paddleocr import PaddleOCR
             self.ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
@@ -22,9 +25,18 @@ class PDFProcessor:
         except Exception as e:
             logger.warning(f"PaddleOCR不可用,将只支持纯文字PDF: {e}")
 
+        # 尝试加载pymupdf4llm（更强大的PDF转Markdown）
+        try:
+            import pymupdf4llm
+            self.pymupdf4llm = pymupdf4llm
+            self.pymupdf_available = True
+            logger.info("pymupdf4llm可用，将使用高级PDF转Markdown功能")
+        except ImportError:
+            logger.info("pymupdf4llm未安装，使用基础PDF提取功能")
+
     def extract_text(self, file_content: bytes) -> Tuple[str, bool]:
         """
-        提取PDF文本
+        提取PDF文本（优先使用pymupdf4llm转Markdown）
 
         Args:
             file_content: PDF文件内容
@@ -32,7 +44,17 @@ class PDFProcessor:
         Returns:
             (提取的文本, 是否使用了OCR)
         """
-        # 先尝试提取纯文字
+        # 优先使用pymupdf4llm转Markdown（保留图片、表格结构）
+        if self.pymupdf_available:
+            try:
+                markdown_text = self._extract_to_markdown(file_content)
+                if markdown_text.strip():
+                    logger.info("使用pymupdf4llm成功提取PDF为Markdown")
+                    return markdown_text, False
+            except Exception as e:
+                logger.warning(f"pymupdf4llm提取失败，降级到基础提取: {e}")
+
+        # 降级：先尝试提取纯文字
         text, is_text_based = self._extract_text_based(file_content)
 
         # 如果是纯文字PDF且提取成功
@@ -48,6 +70,28 @@ class PDFProcessor:
 
         # 如果OCR也失败,返回原文本
         return text, False
+
+    def _extract_to_markdown(self, file_content: bytes) -> str:
+        """
+        使用pymupdf4llm将PDF转换为Markdown格式
+        保留图片描述、表格结构等
+        """
+        try:
+            import fitz  # PyMuPDF
+
+            # 从字节流创建PDF文档
+            pdf_stream = io.BytesIO(file_content)
+            doc = fitz.open(stream=pdf_stream, filetype="pdf")
+
+            # 使用pymupdf4llm转换为Markdown
+            markdown_text = self.pymupdf4llm.to_markdown(doc)
+
+            doc.close()
+            return markdown_text
+
+        except Exception as e:
+            logger.error(f"PDF转Markdown失败: {e}")
+            return ""
 
     def _extract_text_based(self, file_content: bytes) -> Tuple[str, bool]:
         """提取纯文字PDF"""

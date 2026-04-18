@@ -2,7 +2,7 @@
 智能客服对话API
 """
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from app.schemas.chat import (
@@ -18,6 +18,7 @@ from app.models.user import User
 from app.config.database import get_db
 import logging
 import json
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,72 @@ async def delete_conversation(
         raise
     except Exception as e:
         logger.error(f"删除对话失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/conversations/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    导出对话为txt文件
+    """
+    try:
+        chat_service = ChatService(db)
+
+        # 获取对话详情
+        conversation = await chat_service.get_conversation(
+            conversation_id=conversation_id,
+            user_id=current_user.id
+        )
+
+        if not conversation:
+            raise HTTPException(status_code=404, detail="会话不存在")
+
+        # 获取所有消息
+        messages = await chat_service.get_conversation_history(
+            conversation_id=conversation_id,
+            limit=1000  # 导出所有消息
+        )
+
+        # 生成txt内容
+        txt_content = f"对话标题：{conversation.title}\n"
+        txt_content += f"创建时间：{conversation.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        txt_content += "=" * 50 + "\n\n"
+
+        for msg in messages:
+            role_name = "用户" if msg.role == "user" else "助手"
+            txt_content += f"{role_name}：\n"
+            txt_content += f"{msg.content}\n"
+            txt_content += f"时间：{msg.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            txt_content += "-" * 50 + "\n\n"
+
+        # 生成文件名（使用URL编码支持中文）
+        from urllib.parse import quote
+        safe_title = "".join(c for c in conversation.title if c.isalnum() or c in (' ', '-', '_'))[:50]
+        date_str = datetime.now().strftime('%Y%m%d')
+
+        # ASCII安全的文件名作为fallback
+        filename_ascii = f"conversation_{date_str}.txt"
+        # UTF-8编码的文件名
+        filename_utf8 = f"对话_{safe_title}_{date_str}.txt"
+        filename_encoded = quote(filename_utf8)
+
+        # 返回文件（使用RFC 5987格式支持中文文件名）
+        return Response(
+            content=txt_content.encode('utf-8'),
+            media_type='text/plain; charset=utf-8',
+            headers={
+                'Content-Disposition': f"attachment; filename=\"{filename_ascii}\"; filename*=UTF-8''{filename_encoded}"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"导出对话失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

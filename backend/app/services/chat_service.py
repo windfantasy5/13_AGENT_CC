@@ -206,8 +206,14 @@ class ChatService:
         """构建对话上下文"""
         messages = []
 
-        # 系统提示
-        system_prompt = "你是一个专业的AI助手，请根据提供的参考资料回答用户问题。"
+        # 从提示词文件加载系统提示（如文件不存在则使用默认值）
+        from app.config.settings import PROJECT_ROOT
+        from pathlib import Path
+        prompt_file = PROJECT_ROOT / "backend" / "app" / "prompts" / "rag_summarize.txt"
+        if prompt_file.exists():
+            system_prompt = prompt_file.read_text(encoding="utf-8")
+        else:
+            system_prompt = "你是一个专业的AI助手，请根据提供的参考资料回答用户问题。"
 
         # RAG检索
         rag_context = ""

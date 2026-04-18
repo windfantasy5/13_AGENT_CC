@@ -4,7 +4,7 @@ FastAPI主应用入口
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import settings
-from app.api.v1 import auth, user, document, knowledge, llm, chat
+from app.api.v1 import auth, user, document, knowledge, llm, chat, prompts
 
 # 创建FastAPI应用
 app = FastAPI(
@@ -30,6 +30,7 @@ app.include_router(document.router, prefix="/api/v1/documents", tags=["文档管
 app.include_router(knowledge.router, prefix="/api/v1/knowledge", tags=["知识库检索"])
 app.include_router(llm.router, prefix="/api/v1/llm", tags=["LLM管理"])
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["智能对话"])
+app.include_router(prompts.router, prefix="/api/v1/prompts", tags=["提示词管理"])
 
 
 @app.get("/")

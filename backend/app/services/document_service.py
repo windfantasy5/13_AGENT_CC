@@ -11,7 +11,7 @@ from app.models.document import Document, DocumentChunk
 from app.core.text_splitter import SmartTextSplitter
 from app.core.pdf_processor import PDFProcessor
 from app.core.vector_store import VectorStore
-# from app.core.web_scraper import WebScraper  # 暂时注释,兼容性问题
+from app.core.web_scraper import WebScraper
 from app.config.settings import settings
 import logging
 from docx import Document as DocxDocument
@@ -27,9 +27,9 @@ class DocumentService:
         self.text_splitter = SmartTextSplitter()
         self.pdf_processor = PDFProcessor()
         self.vector_store = VectorStore()
-        # self.web_scraper = WebScraper()  # 暂时注释
-        self.upload_dir = Path(settings.UPLOAD_DIR)
-        self.upload_dir.mkdir(exist_ok=True)
+        self.web_scraper = WebScraper()
+        self.upload_dir = Path(settings.upload_dir_abs_path)
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
 
     async def process_file_upload(
         self,
@@ -168,11 +168,9 @@ class DocumentService:
             url: 网页URL
 
         Returns:
-            {title, content}
+            {title, content, markdown}
         """
-        # 暂时不支持网页抓取
-        raise Exception("网页抓取功能暂时不可用,请稍后再试")
-        # return await self.web_scraper.fetch_and_extract(url)
+        return await self.web_scraper.fetch_and_extract(url)
 
     def preview_chunks(
         self,

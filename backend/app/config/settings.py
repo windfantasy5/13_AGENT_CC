@@ -4,6 +4,15 @@
 from pydantic_settings import BaseSettings
 from typing import List
 import os
+from pathlib import Path
+
+# 项目根目录：backend/app/config/settings.py -> 向上3级 -> 项目根目录
+# 结构: 项目根/backend/app/config/settings.py
+_THIS_FILE = Path(__file__).resolve()
+# backend目录
+_BACKEND_DIR = _THIS_FILE.parent.parent.parent
+# 项目根目录（backend的父目录）
+PROJECT_ROOT = _BACKEND_DIR.parent
 
 
 class Settings(BaseSettings):
@@ -35,10 +44,11 @@ class Settings(BaseSettings):
 
     # 文件上传配置
     MAX_UPLOAD_SIZE: int = 52428800  # 50MB
-    UPLOAD_DIR: str = "./uploads"
+    # 使用相对路径配置，运行时转为绝对路径
+    UPLOAD_DIR: str = "data/uploads"
 
-    # Chroma配置
-    CHROMA_DB_PATH: str = "./chroma_db"
+    # Chroma配置（相对于项目根目录的路径，运行时转为绝对路径）
+    CHROMA_DB_PATH: str = "chroma_db"
 
     # 服务器配置
     HOST: str = "0.0.0.0"
@@ -52,6 +62,22 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> List[str]:
         """获取CORS origins列表"""
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+
+    @property
+    def chroma_db_abs_path(self) -> str:
+        """获取ChromaDB的绝对路径（基于项目根目录）"""
+        path = Path(self.CHROMA_DB_PATH)
+        if path.is_absolute():
+            return str(path)
+        return str(PROJECT_ROOT / self.CHROMA_DB_PATH)
+
+    @property
+    def upload_dir_abs_path(self) -> str:
+        """获取上传目录的绝对路径（基于项目根目录）"""
+        path = Path(self.UPLOAD_DIR)
+        if path.is_absolute():
+            return str(path)
+        return str(PROJECT_ROOT / self.UPLOAD_DIR)
 
     class Config:
         env_file = ".env"
@@ -68,4 +94,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# 导出项目根目录供其他模块使用
+__all__ = ["settings", "PROJECT_ROOT"]
 

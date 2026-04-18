@@ -18,9 +18,11 @@ class VectorStore:
 
     def __init__(self):
         """初始化Chroma客户端"""
-        # 创建Chroma存储目录
-        chroma_path = Path(settings.CHROMA_DB_PATH)
+        # 使用绝对路径，确保任何工作目录启动都指向同一位置
+        chroma_path = Path(settings.chroma_db_abs_path)
         chroma_path.mkdir(parents=True, exist_ok=True)
+
+        logger.info(f"向量数据库绝对路径: {chroma_path}")
 
         # 初始化Chroma客户端
         self.client = chromadb.PersistentClient(
@@ -37,13 +39,14 @@ class VectorStore:
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
 
-        # 获取或创建集合
+        # 获取或创建集合（集合名固定，避免多次创建不同集合）
         self.collection = self.client.get_or_create_collection(
             name="document_chunks",
             metadata={"description": "企业知识库文档分块向量"}
         )
 
-        logger.info(f"向量存储初始化完成，存储路径: {chroma_path}")
+        count = self.collection.count()
+        logger.info(f"向量存储初始化完成，路径: {chroma_path}，集合: {self.collection.name}，已有向量数: {count}")
 
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
