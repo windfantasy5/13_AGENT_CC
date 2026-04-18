@@ -231,6 +231,20 @@ export default function Chat() {
     }
   };
 
+  const clearAllConversations = async () => {
+    if (!confirm('确定要清空所有对话记录吗？此操作不可恢复！')) return;
+
+    try {
+      await chatAPI.deleteAllConversations();
+      setConversations([]);
+      setCurrentConversation(null);
+      setMessages([]);
+    } catch (error) {
+      console.error('Failed to clear all conversations:', error);
+      alert('清空失败: ' + (error as Error).message);
+    }
+  };
+
   const exportConversation = async (id: number, title: string) => {
     try {
       const token = localStorage.getItem('token');
@@ -296,7 +310,7 @@ export default function Chat() {
     <div className="flex flex-col h-screen">
       {/* 顶部导航栏 */}
       <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
             智能问答系统
           </h1>
@@ -329,13 +343,21 @@ export default function Chat() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden pt-8">
         {/* Sidebar */}
         <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 bg-white border-r border-gray-200 flex flex-col overflow-hidden`}>
-          <div className="p-4 border-b border-gray-200">
+          <div className="p-4 border-b border-gray-200 space-y-2">
             <button onClick={createNewConversation} className="btn-primary w-full text-sm">
               + 新建对话
             </button>
+            {conversations.length > 0 && (
+              <button
+                onClick={clearAllConversations}
+                className="btn-secondary w-full text-sm text-red-600 hover:bg-red-50"
+              >
+                清空所有对话
+              </button>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-2">

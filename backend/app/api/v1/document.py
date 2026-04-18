@@ -313,7 +313,7 @@ async def delete_document(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """删除文档"""
+    """删除文档（同时删除向量索引和BM25索引）"""
     try:
         result = await db.execute(
             select(Document).where(
@@ -326,10 +326,38 @@ async def delete_document(
         if not document:
             return error_response(code=404, message="文档不存在")
 
+        # 获取该文档的所有分块ID
+        chunks_result = await db.execute(
+            select(DocumentChunk).where(DocumentChunk.document_id == doc_id)
+        )
+        chunks = chunks_result.scalars().all()
+        chunk_ids = [chunk.id for chunk in chunks]
+
+        # 1. 删除向量索引
+        try:
+            from app.core.vector_store import VectorStore
+            vector_store = VectorStore()
+            vector_store.delete_document_chunks(doc_id)
+            logger.info(f"文档 {doc_id} 的向量索引已删除")
+        except Exception as e:
+            logger.error(f"删除向量索引失败: {e}")
+
+        # 2. 删除BM25索引
+        try:
+            from app.core.bm25_retriever import BM25Retriever
+            bm25_retriever = BM25Retriever()
+            await bm25_retriever._load_index_from_redis()
+            await bm25_retriever.delete_documents(chunk_ids)
+            await bm25_retriever.close()
+            logger.info(f"文档 {doc_id} 的BM25索引已删除")
+        except Exception as e:
+            logger.error(f"删除BM25索引失败: {e}")
+
+        # 3. 删除数据库记录
         await db.delete(document)
         await db.commit()
 
-        return success_response(message="文档删除成功")
+        return success_response(message="文档删除成功（包括向量索引和BM25索引）")
 
     except Exception as e:
         logger.error(f"删除文档失败: {e}")

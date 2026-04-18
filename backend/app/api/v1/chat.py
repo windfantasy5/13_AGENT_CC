@@ -196,6 +196,29 @@ async def delete_conversation(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/conversations", response_model=dict)
+async def delete_all_conversations(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    删除当前用户的所有对话会话
+    """
+    try:
+        chat_service = ChatService(db)
+        count = await chat_service.delete_all_conversations(user_id=current_user.id)
+
+        return {
+            "code": 200,
+            "message": f"成功删除 {count} 个对话",
+            "data": {"count": count}
+        }
+
+    except Exception as e:
+        logger.error(f"删除所有对话失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/conversations/{conversation_id}/export")
 async def export_conversation(
     conversation_id: int,

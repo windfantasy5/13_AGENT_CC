@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.conversation import Conversation, Message
 from app.services.rag_service import RAGService
 from app.services.llm_service import LLMService
+from app.services.judge_service import JudgeService
 from app.config.database import get_db
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ class ChatService:
         self.db = db
         self.rag_service = RAGService()
         self.llm_service = LLMService()
+        self.judge_service = JudgeService()
 
     async def create_conversation(self, user_id: int, title: Optional[str] = None) -> Conversation:
         """创建对话会话"""
@@ -109,6 +111,24 @@ class ChatService:
 
         logger.info(f"删除对话会话: {conversation_id}")
         return True
+
+    async def delete_all_conversations(self, user_id: int) -> int:
+        """删除用户的所有对话会话"""
+        # 查询所有对话
+        stmt = select(Conversation).where(Conversation.user_id == user_id)
+        result = await self.db.execute(stmt)
+        conversations = result.scalars().all()
+
+        count = len(conversations)
+
+        # 删除所有对话（级联删除消息）
+        for conv in conversations:
+            await self.db.delete(conv)
+
+        await self.db.commit()
+
+        logger.info(f"删除用户 {user_id} 的所有对话: {count} 个")
+        return count
 
     async def get_conversation_history(
         self,
@@ -314,18 +334,91 @@ class ChatService:
 
         # RAG检索
         rag_results = []
-        if use_rag:
-            try:
-                search_result = await self.rag_service.search_knowledge(
-                    query=content,
-                    top_k=3,
-                    document_id=document_id,
-                    use_cache=True
-                )
-                rag_results = search_result.get("results", [])
+        retrieval_passed = False
+        retry_count = 0
+        max_retries = 2
 
-                # 发送检索到的信息
+        if use_rag:
+            # 带评判的检索循环
+            while retry_count <= max_retries and not retrieval_passed:
+                try:
+                    # 调整检索参数（重试时增加top_k）
+                    top_k = 3 + retry_count
+
+                    search_result = await self.rag_service.search_knowledge(
+                        query=content,
+                        top_k=top_k,
+                        document_id=document_id,
+                        use_cache=(retry_count == 0)  # 仅首次使用缓存
+                    )
+                    rag_results = search_result.get("results", [])
+
+                    if rag_results:
+                        # 评判检索质量
+                        judge_result = await self.judge_service.judge_retrieval_quality(
+                            query=content,
+                            retrieved_docs=rag_results
+                        )
+
+                        # 发送评判结果
+                        yield {
+                            "type": "judge_retrieval",
+                            "data": {
+                                "score": judge_result.get("score", 0),
+                                "reason": judge_result.get("reason", ""),
+                                "passed": judge_result.get("passed", False),
+                                "retry_count": retry_count
+                            }
+                        }
+
+                        if judge_result.get("passed", False):
+                            retrieval_passed = True
+
+                            # 一致性检查
+                            consistency_result = await self.judge_service.check_consistency(
+                                retrieved_docs=rag_results
+                            )
+
+                            # 发送一致性检查结果
+                            yield {
+                                "type": "judge_consistency",
+                                "data": {
+                                    "has_conflict": consistency_result.get("has_conflict", False),
+                                    "conflicts": consistency_result.get("conflicts", []),
+                                    "summary": consistency_result.get("summary", "")
+                                }
+                            }
+
+                            # 发送检索到的信息
+                            yield {
+                                "type": "rag_context",
+                                "data": {
+                                    "results": [
+                                        {
+                                            "content": r["content"],
+                                            "score": r["score"],
+                                            "document_title": r.get("document_title", "未知文档")
+                                        }
+                                        for r in rag_results
+                                    ]
+                                }
+                            }
+                        else:
+                            retry_count += 1
+                            if retry_count <= max_retries:
+                                logger.info(f"检索质量不足，重试 {retry_count}/{max_retries}")
+                    else:
+                        # 没有检索到结果
+                        break
+
+                except Exception as e:
+                    logger.warning(f"RAG检索失败: {e}")
+                    break
+
+            # 如果所有重试都失败，处理结果
+            if not retrieval_passed:
                 if rag_results:
+                    logger.warning("检索质量评判未通过，但继续使用检索结果")
                     yield {
                         "type": "rag_context",
                         "data": {
@@ -339,8 +432,16 @@ class ChatService:
                             ]
                         }
                     }
-            except Exception as e:
-                logger.warning(f"RAG检索失败: {e}")
+                else:
+                    # 没有检索到任何结果，发送提示
+                    logger.warning("未检索到相关资料")
+                    yield {
+                        "type": "rag_context",
+                        "data": {
+                            "results": [],
+                            "message": "未找到相关参考资料，将基于通用知识回答"
+                        }
+                    }
 
         # 构建对话上下文
         messages = await self._build_chat_context(
@@ -352,43 +453,112 @@ class ChatService:
 
         # 流式调用LLM
         full_content = ""
-        try:
-            # 检查LLM服务是否支持流式
-            if hasattr(self.llm_service, 'chat_completion_stream'):
-                async for chunk in self.llm_service.chat_completion_stream(
-                    messages=messages,
-                    temperature=0.7,
-                    max_tokens=2000
-                ):
-                    full_content += chunk.get("content", "")
+        answer_passed = False
+        answer_retry_count = 0
+        max_answer_retries = 1  # 答案重试次数较少
+
+        while answer_retry_count <= max_answer_retries and not answer_passed:
+            try:
+                # 重新构建上下文（重试时可能需要）
+                if answer_retry_count > 0:
+                    messages = await self._build_chat_context(
+                        conversation_id=conversation_id,
+                        user_query=content,
+                        use_rag=use_rag,
+                        document_id=document_id
+                    )
+
+                full_content = ""
+
+                # 检查LLM服务是否支持流式
+                if hasattr(self.llm_service, 'chat_completion_stream'):
+                    async for chunk in self.llm_service.chat_completion_stream(
+                        messages=messages,
+                        temperature=0.7,
+                        max_tokens=2000
+                    ):
+                        full_content += chunk.get("content", "")
+                        yield {
+                            "type": "assistant_chunk",
+                            "data": {
+                                "content": chunk.get("content", "")
+                            }
+                        }
+                else:
+                    # 降级到非流式
+                    response = await self.llm_service.chat_completion(
+                        messages=messages,
+                        temperature=0.7,
+                        max_tokens=2000
+                    )
+                    full_content = response["content"]
                     yield {
                         "type": "assistant_chunk",
                         "data": {
-                            "content": chunk.get("content", "")
+                            "content": full_content
                         }
                     }
-            else:
-                # 降级到非流式
-                response = await self.llm_service.chat_completion(
-                    messages=messages,
-                    temperature=0.7,
-                    max_tokens=2000
-                )
-                full_content = response["content"]
-                yield {
-                    "type": "assistant_chunk",
-                    "data": {
-                        "content": full_content
-                    }
-                }
 
-            # 保存AI回复
+                # 答案质量评判
+                if use_rag and rag_results:
+                    rag_context = self.rag_service.build_rag_context(rag_results)
+                    answer_judge_result = await self.judge_service.judge_answer_quality(
+                        query=content,
+                        context=rag_context,
+                        answer=full_content
+                    )
+
+                    # 发送答案质量评判结果
+                    yield {
+                        "type": "judge_answer",
+                        "data": {
+                            "score": answer_judge_result.get("score", 0),
+                            "reason": answer_judge_result.get("reason", ""),
+                            "passed": answer_judge_result.get("passed", False),
+                            "issues": answer_judge_result.get("issues", []),
+                            "retry_count": answer_retry_count
+                        }
+                    }
+
+                    if answer_judge_result.get("passed", False):
+                        answer_passed = True
+                    else:
+                        answer_retry_count += 1
+                        if answer_retry_count <= max_answer_retries:
+                            logger.info(f"答案质量不足，重新生成 {answer_retry_count}/{max_answer_retries}")
+                            # 清空之前的内容，准备重新生成
+                            yield {
+                                "type": "regenerating",
+                                "data": {
+                                    "message": "答案质量不足，正在重新生成..."
+                                }
+                            }
+                            continue
+                else:
+                    # 不使用RAG或没有检索结果，跳过答案评判
+                    answer_passed = True
+
+                # 跳出循环
+                break
+
+            except Exception as e:
+                logger.error(f"答案生成失败: {e}")
+                # 如果是最后一次重试，发送错误提示并跳出循环
+                if answer_retry_count >= max_answer_retries:
+                    logger.error(f"答案生成失败，已达到最大重试次数")
+                    # 设置一个默认错误消息
+                    full_content = "抱歉，我暂时无法回答这个问题。可能是因为：\n1. 未找到相关参考资料\n2. 系统处理出现问题\n\n请尝试：\n- 换一种方式提问\n- 上传相关文档后再提问\n- 新建对话重试"
+                    break
+                answer_retry_count += 1
+
+        # 保存AI回复
+        try:
             assistant_message = Message(
                 conversation_id=conversation_id,
                 role="assistant",
                 content=full_content,
                 tokens_used=len(full_content),  # 简单估算
-                model_name="gpt-3.5-turbo"
+                model_name="qwen3-max"  # 使用qwen3-max作为生成模型
             )
             self.db.add(assistant_message)
 
@@ -415,4 +585,15 @@ class ChatService:
         except Exception as e:
             await self.db.rollback()
             logger.error(f"流式对话失败: {e}")
-            raise
+
+            # 发送错误消息给前端
+            yield {
+                "type": "error",
+                "data": {
+                    "message": "抱歉，生成回复时出现错误，请重试或新建对话。",
+                    "error": str(e)
+                }
+            }
+
+            # 不再抛出异常，避免前端卡住
+            # raise

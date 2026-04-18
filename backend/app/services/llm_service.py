@@ -30,18 +30,24 @@ class LLMService:
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 2000,
-        stream: bool = False
+        stream: bool = False,
+        model: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         聊天补全
-        自动使用负载均衡器选择模型
+        自动使用负载均衡器选择模型（除非指定model参数）
+
+        Args:
+            model: 指定模型名称，如果为None则使用负载均衡器
         """
         balancer = await get_llm_balancer()
-        current_model = await balancer.get_current_model()
+        current_model = model if model else await balancer.get_current_model()
 
         try:
-            if current_model == LLMBalancer.PRIMARY_MODEL:
-                # 使用主模型（qwen3-max）
+            # 判断使用哪个API
+            # qwen 系列模型使用 OpenAI API
+            if current_model.startswith("qwen") or current_model == LLMBalancer.PRIMARY_MODEL:
+                # 使用主模型（qwen3-max）或其他qwen系列模型
                 response = await self._call_openai(
                     messages=messages,
                     model=current_model,
@@ -50,7 +56,7 @@ class LLMService:
                     stream=stream
                 )
             else:
-                # 使用备用模型（deepseek-r1:7b）
+                # 使用备用模型（deepseek-r1:7b）或其他ollama模型
                 response = await self._call_ollama(
                     messages=messages,
                     model=current_model,
@@ -59,12 +65,17 @@ class LLMService:
                     stream=stream
                 )
 
-            # 记录成功
-            await balancer.record_success(current_model)
+            # 记录成功（仅当未指定模型时）
+            if not model:
+                await balancer.record_success(current_model)
             return response
 
         except Exception as e:
             logger.error(f"LLM调用失败 (模型: {current_model}): {e}")
+
+            # 如果指定了模型，直接抛出异常，不进行切换
+            if model:
+                raise
 
             # 记录失败
             switched = await balancer.record_failure(current_model)
@@ -76,7 +87,8 @@ class LLMService:
                     messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    stream=stream
+                    stream=stream,
+                    model=None  # 重试时不指定模型
                 )
             else:
                 # 未切换，直接抛出异常
@@ -170,8 +182,10 @@ class LLMService:
         current_model = await balancer.get_current_model()
 
         try:
-            if current_model == LLMBalancer.PRIMARY_MODEL:
-                # 使用主模型（qwen3-max）流式调用
+            # 判断使用哪个API
+            # qwen 系列模型使用 OpenAI API
+            if current_model.startswith("qwen") or current_model == LLMBalancer.PRIMARY_MODEL:
+                # 使用主模型（qwen3-max）或其他qwen系列模型流式调用
                 async for chunk in self._stream_openai(
                     messages=messages,
                     model=current_model,
@@ -180,7 +194,7 @@ class LLMService:
                 ):
                     yield chunk
             else:
-                # 使用备用模型（deepseek-r1:7b）流式调用
+                # 使用备用模型（deepseek-r1:7b）或其他ollama模型流式调用
                 async for chunk in self._stream_ollama(
                     messages=messages,
                     model=current_model,
@@ -280,7 +294,8 @@ class LLMService:
                 {"role": "user", "content": "Hello"}
             ]
 
-            if model == LLMBalancer.PRIMARY_MODEL:
+            # 判断使用哪个API
+            if model.startswith("qwen") or model == LLMBalancer.PRIMARY_MODEL:
                 await self._call_openai(
                     messages=test_messages,
                     model=model,

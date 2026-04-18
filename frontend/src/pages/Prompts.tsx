@@ -11,6 +11,7 @@ export default function Prompts() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const navigate = useNavigate();
+  const username = localStorage.getItem('username') || '用户';
 
   useEffect(() => {
     fetchPrompt();
@@ -100,6 +101,12 @@ export default function Prompts() {
             <button className="text-blue-600 font-medium">
               提示词设置
             </button>
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                {username[0].toUpperCase()}
+              </div>
+              <span className="font-medium text-gray-800">{username}</span>
+            </div>
             <button onClick={handleLogout} className="btn-secondary">
               退出登录
             </button>

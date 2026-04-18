@@ -43,6 +43,7 @@ export default function Knowledge() {
   const [success, setSuccess] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+  const username = localStorage.getItem('username') || '用户';
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -264,6 +265,12 @@ export default function Knowledge() {
             >
               提示词设置
             </button>
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                {username[0].toUpperCase()}
+              </div>
+              <span className="font-medium text-gray-800">{username}</span>
+            </div>
             <button
               onClick={handleLogout}
               className="btn-secondary"

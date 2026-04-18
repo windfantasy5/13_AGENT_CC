@@ -58,6 +58,9 @@ export const chatAPI = {
   deleteConversation: (id: number) =>
     api.delete(`/chat/conversations/${id}`),
 
+  deleteAllConversations: () =>
+    api.delete('/chat/conversations'),
+
   sendMessage: (conversationId: number, content: string, useRag = true) =>
     api.post('/chat/message', { conversation_id: conversationId, content, use_rag: useRag }),
 

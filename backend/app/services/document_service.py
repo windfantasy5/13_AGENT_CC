@@ -211,7 +211,7 @@ class DocumentService:
         db: AsyncSession
     ) -> int:
         """
-        保存文档分段并向量化
+        保存文档分段并同时构建向量索引和BM25索引
 
         Args:
             document_id: 文档ID
@@ -250,20 +250,24 @@ class DocumentService:
         for chunk in chunk_records:
             await db.refresh(chunk)
 
-        # 向量化并存储
-        try:
-            chunk_ids = [chunk.id for chunk in chunk_records]
-            contents = [chunk.content for chunk in chunk_records]
-            metadatas = [
-                {
-                    "document_id": document_id,
-                    "chunk_index": chunk.chunk_index,
-                    "char_count": chunk.char_count
-                }
-                for chunk in chunk_records
-            ]
+        # 准备数据
+        chunk_ids = [chunk.id for chunk in chunk_records]
+        contents = [chunk.content for chunk in chunk_records]
+        metadatas = [
+            {
+                "document_id": document_id,
+                "chunk_index": chunk.chunk_index,
+                "char_count": chunk.char_count
+            }
+            for chunk in chunk_records
+        ]
 
-            # 添加到向量库
+        # 并行构建向量索引和BM25索引
+        vector_success = False
+        bm25_success = False
+
+        # 1. 向量化并存储
+        try:
             vector_ids = self.vector_store.add_chunks(
                 chunk_ids=chunk_ids,
                 contents=contents,
@@ -274,11 +278,35 @@ class DocumentService:
             for i, chunk in enumerate(chunk_records):
                 chunk.vector_id = vector_ids[i]
 
+            vector_success = True
             logger.info(f"文档 {document_id} 的 {len(chunks)} 个分块已向量化")
 
         except Exception as e:
             logger.error(f"向量化失败: {e}")
-            # 向量化失败不影响分块保存，继续执行
+
+        # 2. 构建BM25索引（增量添加）
+        try:
+            from app.core.bm25_retriever import BM25Retriever
+            bm25_retriever = BM25Retriever()
+
+            # 先尝试加载现有索引
+            await bm25_retriever._load_index_from_redis()
+
+            # 增量添加新文档
+            bm25_success = await bm25_retriever.add_documents_incremental(
+                chunk_ids=chunk_ids,
+                contents=contents
+            )
+
+            if bm25_success:
+                logger.info(f"文档 {document_id} 的 {len(chunks)} 个分块已添加到BM25索引")
+            else:
+                logger.warning(f"文档 {document_id} 的BM25索引构建失败")
+
+            await bm25_retriever.close()
+
+        except Exception as e:
+            logger.error(f"BM25索引构建失败: {e}")
 
         # 更新文档状态
         result = await db.execute(
@@ -286,7 +314,17 @@ class DocumentService:
         )
         document = result.scalar_one()
         document.chunk_count = len(chunks)
-        document.status = 'completed'
+
+        # 根据索引构建结果设置状态
+        if vector_success and bm25_success:
+            document.status = 'completed'
+            logger.info(f"文档 {document_id} 处理完成：向量索引✓ BM25索引✓")
+        elif vector_success:
+            document.status = 'completed'
+            logger.warning(f"文档 {document_id} 处理完成：向量索引✓ BM25索引✗")
+        else:
+            document.status = 'failed'
+            logger.error(f"文档 {document_id} 处理失败")
 
         await db.commit()
 
