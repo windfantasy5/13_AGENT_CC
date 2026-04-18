@@ -30,6 +30,7 @@ logs/
 # 数据库文件（本地测试用，不要上传）
 *.db
 *.sqlite3
+*.pdf
 
 # 系统文件
 .DS_Store  # macOS
